@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Transcriptions</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&family=Source+Serif+4:opsz,wght@8..60,500;8..60,620&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <main id="home" class="home">
+    <div class="home-card">
+      <p class="eyebrow">YouTube</p>
+      <h1>Le texte des vidéos, minute par minute.</h1>
+      <p class="lede">Choisissez d’abord les mots à repérer, puis le lien d’une playlist ou d’une seule vidéo. Le texte s’affiche avec un horodatage toutes les cinq secondes.</p>
+      <div class="extract-form">
+        <p class="step">1. Mots-clés</p>
+        <label for="home-keywords">Plusieurs mots-clés, séparés par des virgules</label>
+        <input id="home-keywords" type="text" placeholder="étoile, galaxie, soleil" autocomplete="off">
+        <label class="toggle">
+          <input id="home-proximity" type="checkbox">
+          Ne montrer un passage que si ces mots-clés sont proches
+        </label>
+        <div id="home-proximity-options" class="proximity hidden">
+          <div class="field">
+            <label for="home-count">Mots-clés différents dans l’intervalle</label>
+            <select id="home-count">
+              <option value="1">1</option>
+              <option value="2" selected>2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="home-seconds">Intervalle (secondes)</label>
+            <input id="home-seconds" type="number" min="5" step="5" value="30">
+          </div>
+          <p class="hint">Par exemple, 2 mots-clés différents prononcés en 30 secondes. Vous pouvez en exiger 1, 2, 3 ou 4.</p>
+        </div>
+      </div>
+      <form id="home-form" class="extract-form">
+        <p class="step">2. Playlist ou vidéo</p>
+        <label for="home-url">Lien d’une playlist ou d’une vidéo</label>
+        <input id="home-url" type="url" required placeholder="https://www.youtube.com/playlist?list=… ou https://youtu.be/…" autocomplete="off">
+        <div class="actions">
+          <button class="primary" type="submit">Extraire les sous-titres</button>
+          <button class="secondary" type="button" id="home-force">Forcer la réextraction</button>
+        </div>
+        <div id="home-progress" class="progress-block hidden">
+          <progress id="home-bar" max="100" value="0"></progress>
+          <p id="home-progress-label" class="progress-label"></p>
+        </div>
+        <p id="home-error" class="error" hidden></p>
+      </form>
+      <section id="saved-section" class="saved hidden">
+        <h2>Déjà extraites</h2>
+        <ul id="saved-list" class="saved-list"></ul>
+      </section>
+    </div>
+  </main>
+
+  <div id="workspace" class="layout hidden">
+    <aside class="sidebar">
+      <div class="sidebar-head">
+        <p class="eyebrow">Playlist</p>
+        <h2 id="playlist-title"></h2>
+      </div>
+      <form id="side-form" class="extract-form">
+        <label for="side-url" class="visually-hidden">Lien d’une playlist ou d’une vidéo</label>
+        <input id="side-url" type="url" required placeholder="Autre playlist ou vidéo…" autocomplete="off">
+        <div class="actions">
+          <button class="primary" type="submit">Extraire</button>
+          <button class="secondary" type="button" id="side-force">Réextraire</button>
+        </div>
+        <div id="side-progress" class="progress-block hidden">
+          <progress id="side-bar" max="100" value="0"></progress>
+          <p id="side-progress-label" class="progress-label"></p>
+        </div>
+        <p id="side-error" class="error" hidden></p>
+      </form>
+      <ul id="video-list" class="video-list"></ul>
+    </aside>
+    <article class="reader">
+      <h1 id="video-title"></h1>
+      <p id="video-meta" class="meta"></p>
+      <div id="player-wrap" class="player-wrap">
+        <div class="player"><div id="player"></div></div>
+      </div>
+      <div class="tools">
+        <div class="keyword-row">
+          <label for="keywords">Mots-clés</label>
+          <input id="keywords" type="text" placeholder="étoile, galaxie, soleil" autocomplete="off">
+        </div>
+        <label class="toggle" id="hide-row">
+          <input id="hide-others" type="checkbox">
+          Masquer les passages sans mot-clé
+        </label>
+        <label class="toggle">
+          <input id="proximity" type="checkbox">
+          Seulement si plusieurs mots-clés sont proches
+        </label>
+        <div id="proximity-options" class="proximity hidden">
+          <div class="field">
+            <label for="proximity-count">Mots-clés différents</label>
+            <select id="proximity-count">
+              <option value="1">1</option>
+              <option value="2" selected>2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="proximity-seconds">Intervalle (secondes)</label>
+            <input id="proximity-seconds" type="number" min="5" step="5" value="30">
+          </div>
+        </div>
+        <p id="match-count" class="hint"></p>
+      </div>
+      <div id="transcript" class="transcript"></div>
+      <p id="transcript-note" class="empty-note hidden"></p>
+    </article>
+  </div>
+
+  <script>
+    const state = {
+      playlist: null,
+      videoId: null,
+      segments: [],
+      player: null,
+      playerReady: false,
+      pendingVideoId: null,
+      pendingSeek: null,
+    };
+    let apiReady = false;
+    let playerStarting = false;
+    let pollTimer = null;
+
+    const home = document.getElementById("home");
+    const workspace = document.getElementById("workspace");
+
+    function foldPiece(char) {
+      return char
+        .replaceAll("œ", "oe")
+        .replaceAll("Œ", "oe")
+        .replaceAll("æ", "ae")
+        .replaceAll("Æ", "ae")
+        .normalize("NFD")
+        .replace(/\p{M}/gu, "")
+        .toLocaleLowerCase("fr");
+    }
+
+    function foldMap(text) {
+      let folded = "";
+      const origins = [];
+      for (let index = 0; index < text.length; index += 1) {
+        const piece = foldPiece(text[index]);
+        folded += piece;
+        for (let _ = 0; _ < piece.length; _ += 1) origins.push(index);
+      }
+      return { folded, origins };
+    }
+
+    function parseKeywords(raw) {
+      return raw.split(",").map((part) => part.trim()).filter(Boolean);
+    }
+
+    function foldedKeyword(keyword) {
+      return foldMap(keyword).folded;
+    }
+
+    function keywordsFound(text, keywords) {
+      const folded = foldMap(text).folded;
+      const found = [];
+      keywords.forEach((keyword, index) => {
+        const needle = foldedKeyword(keyword);
+        if (needle && folded.includes(needle)) found.push(index);
+      });
+      return found;
+    }
+
+    function segmentMatches(text, keywords) {
+      return keywordsFound(text, keywords).length > 0;
+    }
+
+    function proximityVisible(segments, keywords, needed, seconds) {
+      const found = segments.map((segment) => keywordsFound(segment.text, keywords));
+      const visible = segments.map(() => false);
+      for (let start = 0; start < segments.length; start += 1) {
+        const end = segments[start].t + seconds;
+        const present = new Set();
+        let last = start;
+        for (let index = start; index < segments.length && segments[index].t <= end; index += 1) {
+          for (const id of found[index]) present.add(id);
+          last = index;
+        }
+        if (present.size >= needed) {
+          for (let index = start; index <= last; index += 1) visible[index] = true;
+        }
+      }
+      return visible;
+    }
+
+    function readSeconds(input) {
+      const value = Number(input.value);
+      return Number.isFinite(value) && value > 0 ? value : 30;
+    }
+
+    function matchRanges(text, keywords) {
+      if (!keywords.length) return [];
+      const { folded, origins } = foldMap(text);
+      const ranges = [];
+      for (const keyword of keywords) {
+        const needle = foldedKeyword(keyword);
+        if (!needle) continue;
+        let from = 0;
+        while (from < folded.length) {
+          const at = folded.indexOf(needle, from);
+          if (at < 0) break;
+          const endAt = at + needle.length - 1;
+          ranges.push([origins[at], origins[endAt] + 1]);
+          from = at + needle.length;
+        }
+      }
+      ranges.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
+      const merged = [];
+      for (const range of ranges) {
+        const last = merged[merged.length - 1];
+        if (!last || range[0] > last[1]) merged.push([range[0], range[1]]);
+        else last[1] = Math.max(last[1], range[1]);
+      }
+      return merged;
+    }
+
+    function formatStamp(total) {
+      const seconds = Math.max(0, Math.floor(total));
+      const hours = Math.floor(seconds / 3600);
+      const minutes = Math.floor((seconds % 3600) / 60);
+      const secs = seconds % 60;
+      const clock = `${minutes}:${String(secs).padStart(2, "0")}`;
+      return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}` : clock;
+    }
+
+    function sourceLabel(source, language) {
+      const kind = source === "manual" ? "sous-titres manuels" : "sous-titres automatiques";
+      return language ? `${kind} · ${language}` : kind;
+    }
+
+    function showError(target, message) {
+      target.hidden = !message;
+      target.textContent = message || "";
+    }
+
+    function setBusy(busy) {
+      for (const button of document.querySelectorAll(".primary, .secondary")) {
+        button.disabled = busy;
+      }
+    }
+
+    function showProgress(prefix, visible, value, label) {
+      const block = document.getElementById(`${prefix}-progress`);
+      const bar = document.getElementById(`${prefix}-bar`);
+      const text = document.getElementById(`${prefix}-progress-label`);
+      block.classList.toggle("hidden", !visible);
+      bar.max = 100;
+      bar.value = value;
+      text.textContent = label;
+    }
+
+    async function loadSaved() {
+      const response = await fetch("/api/playlists");
+      const playlists = await response.json();
+      const section = document.getElementById("saved-section");
+      const list = document.getElementById("saved-list");
+      list.replaceChildren();
+      if (!playlists.length) {
+        section.classList.add("hidden");
+        return;
+      }
+      section.classList.remove("hidden");
+      for (const playlist of playlists) {
+        const item = document.createElement("li");
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "saved-item";
+        button.append(playlist.title);
+        const small = document.createElement("small");
+        small.textContent = `${playlist.count} vidéo${playlist.count > 1 ? "s" : ""} transcrite${playlist.count > 1 ? "s" : ""}`;
+        button.append(small);
+        button.addEventListener("click", () => openPlaylist(playlist.id));
+        item.append(button);
+        list.append(item);
+      }
+    }
+
+    function copyFilterFromHome() {
+      document.getElementById("keywords").value = document.getElementById("home-keywords").value;
+      document.getElementById("proximity").checked = document.getElementById("home-proximity").checked;
+      document.getElementById("proximity-count").value = document.getElementById("home-count").value;
+      document.getElementById("proximity-seconds").value = document.getElementById("home-seconds").value;
+      syncProximityPanel();
+    }
+
+    function syncProximityPanel() {
+      const enabled = document.getElementById("proximity").checked;
+      document.getElementById("proximity-options").classList.toggle("hidden", !enabled);
+      document.getElementById("hide-row").classList.toggle("hidden", enabled);
+    }
+
+    async function openPlaylist(playlistId, preferredVideoId) {
+      copyFilterFromHome();
+      const response = await fetch(`/api/playlists/${encodeURIComponent(playlistId)}`);
+      const payload = await response.json();
+      if (!response.ok) {
+        showError(document.getElementById("home-error"), payload.error || "Playlist introuvable.");
+        return;
+      }
+      state.playlist = payload;
+      home.classList.add("hidden");
+      workspace.classList.remove("hidden");
+      document.getElementById("playlist-title").textContent = payload.title || "Playlist";
+      document.getElementById("side-url").value = payload.url || "";
+      renderVideoList();
+      const first = payload.videos.find((video) => video.id === preferredVideoId)
+        || payload.videos.find((video) => video.status === "ok")
+        || payload.videos[0];
+      if (first) selectVideo(first);
+    }
+
+    function renderVideoList() {
+      const list = document.getElementById("video-list");
+      list.replaceChildren();
+      for (const video of state.playlist.videos) {
+        const item = document.createElement("li");
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "video-btn";
+        if (video.status !== "ok") button.classList.add("skipped");
+        if (video.id === state.videoId) button.classList.add("active");
+        button.append(video.title || video.id);
+        const small = document.createElement("small");
+        if (video.status === "skipped") small.textContent = "Sans sous-titres";
+        else if (video.status === "error") small.textContent = "Erreur";
+        else small.textContent = sourceLabel(video.source, video.language);
+        button.append(small);
+        button.addEventListener("click", () => selectVideo(video));
+        item.append(button);
+        list.append(item);
+      }
+    }
+
+    async function selectVideo(video) {
+      state.videoId = video.id;
+      renderVideoList();
+      document.getElementById("video-title").textContent = video.title || video.id;
+      document.title = video.title || "Transcriptions";
+      const note = document.getElementById("transcript-note");
+      const transcript = document.getElementById("transcript");
+      const tools = document.querySelector(".tools");
+      const playerWrap = document.getElementById("player-wrap");
+      if (video.status !== "ok") {
+        state.segments = [];
+        transcript.replaceChildren();
+        tools.classList.add("hidden");
+        playerWrap.classList.add("hidden");
+        document.getElementById("video-meta").textContent = "";
+        note.classList.remove("hidden");
+        note.textContent = video.status === "error"
+          ? (video.reason || "Cette vidéo n'a pas pu être lue.")
+          : "Cette vidéo n'a pas de sous-titres.";
+        return;
+      }
+      tools.classList.remove("hidden");
+      playerWrap.classList.remove("hidden");
+      note.classList.add("hidden");
+      document.getElementById("video-meta").textContent = sourceLabel(video.source, video.language);
+      const response = await fetch(`/api/playlists/${encodeURIComponent(state.playlist.id)}/videos/${encodeURIComponent(video.id)}`);
+      const payload = await response.json();
+      if (!response.ok) {
+        note.classList.remove("hidden");
+        note.textContent = payload.error || "Transcription introuvable.";
+        return;
+      }
+      if (payload.title) document.getElementById("video-title").textContent = payload.title;
+      state.segments = payload.segments || [];
+      mountPlayer(video.id);
+      renderTranscript();
+    }
+
+    function renderTranscript() {
+      const keywords = parseKeywords(document.getElementById("keywords").value);
+      const proximity = document.getElementById("proximity").checked && keywords.length > 0;
+      const needed = Number(document.getElementById("proximity-count").value) || 2;
+      const seconds = readSeconds(document.getElementById("proximity-seconds"));
+      const hideOthers = !proximity && document.getElementById("hide-others").checked && keywords.length > 0;
+      const transcript = document.getElementById("transcript");
+      const note = document.getElementById("transcript-note");
+      const count = document.getElementById("match-count");
+      transcript.replaceChildren();
+      if (proximity && keywords.length < needed) {
+        count.textContent = "";
+        note.classList.remove("hidden");
+        note.textContent = `Indiquez au moins ${needed} mots-clés différents, séparés par des virgules.`;
+        return;
+      }
+      const windowVisible = proximity ? proximityVisible(state.segments, keywords, needed, seconds) : [];
+      let shown = 0;
+      let matched = 0;
+      state.segments.forEach((segment, index) => {
+        const hit = segmentMatches(segment.text, keywords);
+        if (hit) matched += 1;
+        if (proximity && !windowVisible[index]) return;
+        if (hideOthers && !hit) return;
+        shown += 1;
+        const line = document.createElement("div");
+        line.className = "line";
+        const stamp = document.createElement("button");
+        stamp.type = "button";
+        stamp.className = "stamp";
+        stamp.textContent = formatStamp(segment.t);
+        stamp.addEventListener("click", () => seekTo(segment.t));
+        const utterance = document.createElement("p");
+        utterance.className = "utterance";
+        const ranges = matchRanges(segment.text, keywords);
+        if (!ranges.length) {
+          utterance.textContent = segment.text;
+        } else {
+          let cursor = 0;
+          for (const [start, end] of ranges) {
+            if (start > cursor) utterance.append(segment.text.slice(cursor, start));
+            const mark = document.createElement("mark");
+            mark.textContent = segment.text.slice(start, end);
+            utterance.append(mark);
+            cursor = end;
+          }
+          if (cursor < segment.text.length) utterance.append(segment.text.slice(cursor));
+        }
+        line.append(stamp, utterance);
+        transcript.append(line);
+      });
+      if (proximity) {
+        const label = needed > 1 ? "mots-clés différents apparaissent" : "mot-clé apparaît";
+        count.textContent = `${shown} passage${shown > 1 ? "s" : ""} où au moins ${needed} ${label} en ${seconds} secondes`;
+      } else if (keywords.length) {
+        count.textContent = `${matched} passage${matched > 1 ? "s" : ""} contenant ${keywords.length > 1 ? "ces mots-clés" : "ce mot-clé"}`;
+      } else {
+        count.textContent = state.segments.length
+          ? `${state.segments.length} passage${state.segments.length > 1 ? "s" : ""}`
+          : "";
+      }
+      if (!shown) {
+        note.classList.remove("hidden");
+        note.textContent = !state.segments.length
+          ? "Aucun texte dans les sous-titres."
+          : proximity
+            ? `Aucun intervalle de ${seconds} secondes ne contient ${needed} ${needed > 1 ? "mots-clés différents" : "mot-clé"}.`
+            : "Aucun passage ne contient ces mots-clés.";
+      } else {
+        note.classList.add("hidden");
+        note.textContent = "";
+      }
+    }
+
+    function mountPlayer(videoId) {
+      if (!apiReady || !window.YT || !YT.Player) {
+        state.pendingVideoId = videoId;
+        return;
+      }
+      if (!state.player) {
+        if (playerStarting) {
+          state.pendingVideoId = videoId;
+          return;
+        }
+        playerStarting = true;
+        state.pendingVideoId = null;
+        state.player = new YT.Player("player", {
+          videoId,
+          host: "https://www.youtube-nocookie.com",
+          width: "100%",
+          height: "100%",
+          playerVars: { rel: 0, playsinline: 1, modestbranding: 1 },
+          events: {
+            onReady() {
+              state.playerReady = true;
+              playerStarting = false;
+              const queued = state.pendingVideoId;
+              state.pendingVideoId = null;
+              if (queued && state.player.getVideoData && state.player.getVideoData().video_id !== queued) {
+                state.player.loadVideoById(queued);
+              }
+              if (state.pendingSeek != null) seekTo(state.pendingSeek);
+            },
+          },
+        });
+        return;
+      }
+      state.pendingVideoId = null;
+      state.player.loadVideoById(videoId);
+    }
+
+    function seekTo(seconds) {
+      state.pendingSeek = seconds;
+      if (!state.player || !state.playerReady || !state.player.seekTo) return;
+      state.player.seekTo(seconds, true);
+      state.player.playVideo();
+      state.pendingSeek = null;
+    }
+
+    function progressLabel(job) {
+      if (job.phase === "listing" || !job.total) return "Lecture du lien…";
+      const title = job.video_title ? ` — ${job.video_title}` : "";
+      return `Vidéo ${job.index || 0} sur ${job.total}${title}`;
+    }
+
+    async function pollJob(jobId) {
+      const response = await fetch(`/api/jobs/${jobId}`);
+      const job = await response.json();
+      const value = job.total ? Math.round((100 * (job.index || 0)) / job.total) : (job.phase === "listing" ? 5 : 0);
+      for (const prefix of document.querySelectorAll("#home, #workspace")) {
+        const id = prefix.id === "home" ? "home" : "side";
+        showProgress(id, job.status === "running", job.status === "done" ? 100 : value, progressLabel(job));
+      }
+      if (job.status === "running") {
+        pollTimer = setTimeout(() => pollJob(jobId), 800);
+        return;
+      }
+      setBusy(false);
+      if (job.status === "error") {
+        showError(document.getElementById("home-error"), job.message);
+        showError(document.getElementById("side-error"), job.message);
+        showProgress("home", false, 0, "");
+        showProgress("side", false, 0, "");
+        return;
+      }
+      showError(document.getElementById("home-error"), "");
+      showError(document.getElementById("side-error"), "");
+      showProgress("home", false, 0, "");
+      showProgress("side", false, 0, "");
+      await openPlaylist(job.playlist_id, state.videoId);
+      await loadSaved();
+    }
+
+    async function startExtract(url, force) {
+      showError(document.getElementById("home-error"), "");
+      showError(document.getElementById("side-error"), "");
+      setBusy(true);
+      showProgress("home", true, 4, "Lecture du lien…");
+      showProgress("side", true, 4, "Lecture du lien…");
+      const response = await fetch("/api/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, force }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        setBusy(false);
+        showProgress("home", false, 0, "");
+        showProgress("side", false, 0, "");
+        showError(document.getElementById("home-error"), payload.error || "Extraction impossible.");
+        showError(document.getElementById("side-error"), payload.error || "Extraction impossible.");
+        return;
+      }
+      if (pollTimer) clearTimeout(pollTimer);
+      pollJob(payload.id);
+    }
+
+    document.getElementById("home-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      startExtract(document.getElementById("home-url").value.trim(), false);
+    });
+    document.getElementById("home-force").addEventListener("click", () => {
+      const url = document.getElementById("home-url").value.trim();
+      if (!url) {
+        showError(document.getElementById("home-error"), "Indiquez le lien d'une playlist ou d'une vidéo.");
+        return;
+      }
+      startExtract(url, true);
+    });
+    document.getElementById("side-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      startExtract(document.getElementById("side-url").value.trim(), false);
+    });
+    document.getElementById("side-force").addEventListener("click", () => {
+      const url = document.getElementById("side-url").value.trim();
+      if (!url) {
+        showError(document.getElementById("side-error"), "Indiquez le lien d'une playlist ou d'une vidéo.");
+        return;
+      }
+      startExtract(url, true);
+    });
+    document.getElementById("home-proximity").addEventListener("change", () => {
+      document.getElementById("home-proximity-options").classList.toggle("hidden", !document.getElementById("home-proximity").checked);
+    });
+    for (const id of ["keywords", "proximity-seconds"]) {
+      document.getElementById(id).addEventListener("input", renderTranscript);
+    }
+    for (const id of ["hide-others", "proximity", "proximity-count"]) {
+      document.getElementById(id).addEventListener("change", () => {
+        syncProximityPanel();
+        renderTranscript();
+      });
+    }
+
+    window.onYouTubeIframeAPIReady = function onYouTubeIframeAPIReady() {
+      apiReady = true;
+      if (state.pendingVideoId) mountPlayer(state.pendingVideoId);
+    };
+    window.YTConfig = { host: "https://www.youtube-nocookie.com" };
+    const iframeApi = document.createElement("script");
+    iframeApi.src = "https://www.youtube.com/iframe_api";
+    document.head.appendChild(iframeApi);
+
+    loadSaved();
+  </script>
+</body>
+</html>
