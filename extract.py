@@ -328,8 +328,13 @@ def list_single_video(url: str) -> dict:
             info = ydl.extract_info(url, download=False)
     except DownloadError as exc:
         raise ExtractError(f"Impossible de lire la vidéo : {exc}") from exc
-    if not info or info.get("_type") in {"playlist", "multi_video"}:
-        raise ExtractError("Ce lien n'est pas une vidéo YouTube.")
+    if not info:
+        raise ExtractError(
+            "YouTube n'a pas renvoyé cette vidéo. Le lien est valide, "
+            "mais depuis Vercel YouTube bloque la lecture des sous-titres."
+        )
+    if info.get("_type") in {"playlist", "multi_video"}:
+        raise ExtractError("Ce lien ouvre une playlist. Pour une seule vidéo, enlevez le paramètre list=.")
     video_id = str(info.get("id") or "")
     if not SAFE_ID.match(video_id):
         raise ExtractError("Impossible de déterminer l'identifiant de la vidéo.")

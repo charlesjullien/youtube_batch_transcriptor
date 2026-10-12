@@ -21,7 +21,7 @@
         <input id="home-keywords" type="text" placeholder="étoile, galaxie, soleil" autocomplete="off">
         <label class="toggle">
           <input id="home-proximity" type="checkbox">
-          Ne montrer un passage que si ces mots-clés sont proches
+          Inscrire plusieurs mots-clés différents.
         </label>
         <div id="home-proximity-options" class="proximity hidden">
           <div class="field">
@@ -99,7 +99,7 @@
         </label>
         <label class="toggle">
           <input id="proximity" type="checkbox">
-          Seulement si plusieurs mots-clés sont proches
+          Inscrire plusieurs mots-clés différents.
         </label>
         <div id="proximity-options" class="proximity hidden">
           <div class="field">
@@ -170,12 +170,32 @@
       return foldMap(keyword).folded;
     }
 
+    function isWordChar(char) {
+      return (char >= "a" && char <= "z") || (char >= "0" && char <= "9");
+    }
+
+    function isWholeWordAt(folded, needle, at) {
+      const before = at > 0 ? folded[at - 1] : "";
+      const after = folded[at + needle.length] || "";
+      return !isWordChar(before) && !isWordChar(after);
+    }
+
     function keywordsFound(text, keywords) {
       const folded = foldMap(text).folded;
       const found = [];
       keywords.forEach((keyword, index) => {
         const needle = foldedKeyword(keyword);
-        if (needle && folded.includes(needle)) found.push(index);
+        if (!needle) return;
+        let from = 0;
+        while (from < folded.length) {
+          const at = folded.indexOf(needle, from);
+          if (at < 0) return;
+          if (isWholeWordAt(folded, needle, at)) {
+            found.push(index);
+            return;
+          }
+          from = at + 1;
+        }
       });
       return found;
     }
@@ -218,9 +238,11 @@
         while (from < folded.length) {
           const at = folded.indexOf(needle, from);
           if (at < 0) break;
-          const endAt = at + needle.length - 1;
-          ranges.push([origins[at], origins[endAt] + 1]);
-          from = at + needle.length;
+          if (isWholeWordAt(folded, needle, at)) {
+            const endAt = at + needle.length - 1;
+            ranges.push([origins[at], origins[endAt] + 1]);
+          }
+          from = at + 1;
         }
       }
       ranges.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
