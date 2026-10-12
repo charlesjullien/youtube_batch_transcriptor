@@ -8,7 +8,15 @@ from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request
 
-from extract import ExtractError, extract_playlist, list_saved_playlists, read_manifest, read_video
+from extract import (
+    ExtractError,
+    extract_playlist,
+    list_saved_playlists,
+    read_manifest,
+    read_video,
+    rewrite_transcripts,
+    timestamps_hidden,
+)
 
 ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "data"
@@ -57,6 +65,22 @@ def video(playlist_id: str, video_id: str):
         return jsonify(read_video(DATA, playlist_id, video_id))
     except ExtractError as exc:
         return jsonify({"error": str(exc)}), 404
+
+
+@app.get("/api/timestamps")
+def get_timestamps():
+    return jsonify({"hidden": timestamps_hidden(DATA)})
+
+
+@app.post("/api/timestamps")
+def set_timestamps():
+    body = request.get_json(silent=True) or {}
+    hidden = bool(body.get("hidden"))
+    try:
+        rewrite_transcripts(DATA, hidden)
+    except OSError as exc:
+        return jsonify({"error": f"Impossible de modifier les fichiers texte : {exc}"}), 500
+    return jsonify({"hidden": hidden})
 
 
 @app.post("/api/extract")

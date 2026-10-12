@@ -284,12 +284,56 @@ def bucket_cues(cues: list[tuple[float, str]], bucket: int = BUCKET_SECONDS) -> 
     return segments
 
 
-def render_txt(title: str, url: str, segments: list[dict]) -> str:
+def render_txt(title: str, url: str, segments: list[dict], with_times: bool = True) -> str:
     lines = [title or "", url or "", ""]
     for segment in segments:
-        lines.append(f"[{format_hms(segment['t'])}] {segment['text']}")
+        text = segment["text"]
+        if with_times:
+            lines.append(f"[{format_hms(segment['t'])}] {text}")
+        else:
+            lines.append(text)
     lines.append("")
     return "\n".join(lines)
+
+
+def timestamps_hidden(data_dir: Path) -> bool:
+    path = data_dir / "settings.json"
+    if not path.is_file():
+        return False
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return bool(payload.get("hide_timestamps"))
+
+
+def rewrite_transcripts(data_dir: Path, hide_timestamps: bool) -> None:
+    data_dir.mkdir(parents=True, exist_ok=True)
+    write_json(data_dir / "settings.json", {"hide_timestamps": hide_timestamps})
+    if not data_dir.is_dir():
+        return
+    for entry in data_dir.iterdir():
+        if not entry.is_dir():
+            continue
+        for json_path in entry.glob("*.json"):
+            if json_path.name == "manifest.json":
+                continue
+            try:
+                document = json.loads(json_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            segments = document.get("segments")
+            if not isinstance(segments, list):
+                continue
+            json_path.with_suffix(".txt").write_text(
+                render_txt(
+                    document.get("title") or "",
+                    document.get("url") or "",
+                    segments,
+                    with_times=not hide_timestamps,
+                ),
+                encoding="utf-8",
+            )
 
 
 def write_json(path: Path, payload: dict) -> None:
@@ -454,6 +498,7 @@ def extract_playlist(
     )
 
     options = _ydl_options()
+    with_times = not timestamps_hidden(data_dir)
     with YoutubeDL(options) as ydl:
         for index, video in enumerate(playlist["videos"], start=1):
             cached_json = None if force else find_video_json(directory, video["id"])
@@ -570,7 +615,7 @@ def extract_playlist(
             }
             write_json(json_path, document)
             txt_path.write_text(
-                render_txt(base["title"], base["url"], fetched["segments"]),
+                render_txt(base["title"], base["url"], fetched["segments"], with_times=with_times),
                 encoding="utf-8",
             )
             manifest_videos.append(

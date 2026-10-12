@@ -300,6 +300,8 @@ progress::-moz-progress-bar { background: var(--accent); }
   padding: 0.28rem 0;
 }
 
+.line.unstamped { grid-template-columns: minmax(0, 1fr); }
+
 .stamp {
   padding: 0.15rem 0;
   text-align: right;
