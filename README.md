@@ -1,3 +1,6 @@
+<img width="2558" height="1293" alt="image" src="https://github.com/user-attachments/assets/dac15f5b-944e-49fb-8871-018c928d7174" />
+
+
 # Transcriptions de playlists YouTube
 
 Application locale : à partir du lien d’une playlist ou d’une seule vidéo, elle récupère les sous-titres YouTube (piste manuelle de préférence, sinon automatique ; français d’abord) et les découpe en passages de cinq secondes.
